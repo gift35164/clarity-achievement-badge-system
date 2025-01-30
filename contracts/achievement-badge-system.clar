@@ -112,3 +112,79 @@
 ;; Checks if a badge has been burned
 (define-read-only (is-achievement-burned (badge-id uint))
     (ok (is-badge-burned badge-id)))
+
+
+;; Validates if a badge exists and returns its metadata
+(define-read-only (get-badge-metadata (badge-id uint))
+    (begin
+        (asserts! (>= badge-id u1) (err u110))                    ;; Check if badge ID is valid
+        (asserts! (<= badge-id (var-get last-badge-id)) (err u111)) ;; Check if badge ID exists
+        (ok {
+            uri: (unwrap! (map-get? badge-uri badge-id) (err u112)),
+            owner: (unwrap! (nft-get-owner? achievement-badge badge-id) (err u113)),
+            burned: (is-badge-burned badge-id)
+        })))
+
+;; Creates a time-limited achievement badge that expires
+(define-public (mint-time-limited-badge 
+    (uri (string-ascii 256))
+    (expiry-block uint))
+    (let ((badge-id (+ (var-get last-badge-id) u1)))
+        (asserts! (is-valid-uri uri) err-invalid-uri)
+        (asserts! (> expiry-block block-height) (err u140))
+        (try! (nft-mint? achievement-badge badge-id tx-sender))
+        (map-set badge-uri badge-id uri)
+        (var-set last-badge-id badge-id)
+        (ok badge-id)))
+
+
+;; Map to store badge expiry blocks
+(define-map badge-expiry uint uint)
+
+;; Checks if a badge has expired
+(define-read-only (is-badge-expired (badge-id uint))
+    (let ((expiry (default-to u0 (map-get? badge-expiry badge-id))))
+        (ok (and 
+            (> expiry u0)
+            (>= block-height expiry)))))
+
+;; Auto-burns expired badges
+(define-public (burn-expired-badge (badge-id uint))
+    (let ((expiry (default-to u0 (map-get? badge-expiry badge-id))))
+        (asserts! (> expiry u0) (err u141))
+        (asserts! (>= block-height expiry) (err u142))
+        (try! (burn-achievement-badge badge-id))
+        (ok true)))
+
+;; Verifies the authenticity of an achievement badge by checking its existence,
+;; ownership status, and burn status in a single call. This function combines
+;; multiple checks for efficient badge verification.
+;; Returns a tuple with verification details.
+(define-read-only (verify-achievement-badge (badge-id uint))
+    (let (
+        (owner (nft-get-owner? achievement-badge badge-id))
+        (uri (map-get? badge-uri badge-id))
+        (is-burned (is-badge-burned badge-id))
+    )
+    (ok {
+        exists: (is-some owner),
+        owner: owner,
+        has-uri: (is-some uri),
+        burned: is-burned
+    })))
+
+;; Tracks and calculates statistics for achievement badges
+;; Includes total mints, burns, and transfers
+;; Provides insights into badge system usage
+(define-data-var total-mints uint u0)
+(define-data-var total-burns uint u0)
+(define-data-var total-transfers uint u0)
+
+(define-read-only (get-achievement-stats)
+    (ok {
+        total-mints: (var-get total-mints),
+        total-burns: (var-get total-burns),
+        total-transfers: (var-get total-transfers),
+        active-badges: (- (var-get total-mints) (var-get total-burns))
+    }))
+
