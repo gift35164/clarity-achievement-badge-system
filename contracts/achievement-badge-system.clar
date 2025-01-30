@@ -112,3 +112,5 @@
 ;; Checks if a badge has been burned
 (define-read-only (is-achievement-burned (badge-id uint))
     (ok (is-badge-burned badge-id)))
+
+g
